@@ -349,3 +349,70 @@ describe('setLoggingMode', () => {
     assert.ok(true, 'setLoggingMode should accept various options');
   });
 });
+
+describe('isGhInstalled', () => {
+  const { isGhInstalled } = lib;
+
+  it('Should be an async function', () => {
+    assert.ok(
+      typeof isGhInstalled === 'function',
+      'isGhInstalled should be a function'
+    );
+    // Check if it returns a promise
+    const result = isGhInstalled();
+    assert.ok(
+      result instanceof Promise,
+      'isGhInstalled should return a Promise'
+    );
+  });
+
+  it('Should return boolean', async () => {
+    const result = await isGhInstalled();
+    assert.ok(
+      typeof result === 'boolean',
+      'isGhInstalled should return boolean'
+    );
+  });
+});
+
+describe('isGhAuthenticated', () => {
+  const { isGhAuthenticated } = lib;
+
+  it('Should be an async function', () => {
+    assert.ok(
+      typeof isGhAuthenticated === 'function',
+      'isGhAuthenticated should be a function'
+    );
+    const result = isGhAuthenticated();
+    assert.ok(
+      result instanceof Promise,
+      'isGhAuthenticated should return a Promise'
+    );
+  });
+
+  it('Should return boolean', async () => {
+    const result = await isGhAuthenticated();
+    assert.ok(
+      typeof result === 'boolean',
+      'isGhAuthenticated should return boolean'
+    );
+  });
+});
+
+describe('loadPullRequest modes', () => {
+  const { loadPullRequestWithGh, loadPullRequestWithApi } = lib;
+
+  it('Should export loadPullRequestWithGh function', () => {
+    assert.ok(
+      typeof loadPullRequestWithGh === 'function',
+      'loadPullRequestWithGh should be exported'
+    );
+  });
+
+  it('Should export loadPullRequestWithApi function', () => {
+    assert.ok(
+      typeof loadPullRequestWithApi === 'function',
+      'loadPullRequestWithApi should be exported'
+    );
+  });
+});

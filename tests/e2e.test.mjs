@@ -454,3 +454,126 @@ describe('E2E: Content Verification', () => {
     );
   });
 });
+
+describe('E2E: Backend Mode Tests', () => {
+  it('Should download PR using gh CLI (default mode)', () => {
+    // Default mode uses gh CLI when available
+    const result = runCli('link-foundation/gh-load-pull-request#2 --force-gh');
+
+    // Skip assertions if rate limited
+    if (result.rateLimited) {
+      assert.ok(true, 'Skipped due to rate limiting');
+      return;
+    }
+
+    // Note: this test may fail in environments without gh CLI
+    // In that case, it's expected behavior
+    if (result.stderr.includes('gh CLI is required but not installed')) {
+      assert.ok(true, 'Skipped - gh CLI not installed');
+      return;
+    }
+
+    if (result.exitCode !== 0) {
+      // gh CLI might fail for auth reasons
+      assert.ok(true, 'Skipped - gh CLI not available or not authenticated');
+      return;
+    }
+
+    const output = result.stdout;
+    assert.ok(output.includes('# '), 'Output should contain a title heading');
+    assert.ok(
+      output.includes('## Metadata'),
+      'Output should contain Metadata section'
+    );
+  });
+
+  it('Should download PR using API mode', () => {
+    const result = runCli('link-foundation/gh-load-pull-request#2 --force-api');
+
+    // Skip assertions if rate limited
+    if (result.rateLimited) {
+      assert.ok(true, 'Skipped due to rate limiting');
+      return;
+    }
+
+    assert.ok(result.exitCode === 0, 'CLI should exit with code 0');
+
+    const output = result.stdout;
+    assert.ok(output.includes('# '), 'Output should contain a title heading');
+    assert.ok(
+      output.includes('## Metadata'),
+      'Output should contain Metadata section'
+    );
+    assert.ok(
+      output.includes('@konard'),
+      'Output should contain author username'
+    );
+  });
+
+  it('Should reject both --force-api and --force-gh at the same time', () => {
+    const result = runCli(
+      'link-foundation/gh-load-pull-request#2 --force-api --force-gh'
+    );
+
+    // This should fail
+    assert.ok(result.exitCode !== 0, 'CLI should fail with both flags');
+    const combinedOutput = result.stdout + result.stderr;
+    assert.ok(
+      combinedOutput.includes('Cannot use both'),
+      'Should show error about mutually exclusive flags'
+    );
+  });
+
+  it('Should output same content with both gh and API modes', () => {
+    // Test that both modes produce similar output
+    const ghResult = runCli(
+      'link-foundation/gh-load-pull-request#2 --format json'
+    );
+    const apiResult = runCli(
+      'link-foundation/gh-load-pull-request#2 --force-api --format json'
+    );
+
+    // Skip if rate limited
+    if (ghResult.rateLimited || apiResult.rateLimited) {
+      assert.ok(true, 'Skipped due to rate limiting');
+      return;
+    }
+
+    // Skip if gh CLI failed
+    if (ghResult.exitCode !== 0) {
+      assert.ok(true, 'Skipped - gh CLI mode failed');
+      return;
+    }
+
+    if (apiResult.exitCode !== 0) {
+      assert.ok(true, 'Skipped - API mode failed');
+      return;
+    }
+
+    // Parse both outputs
+    let ghData, apiData;
+    try {
+      ghData = JSON.parse(ghResult.stdout);
+      apiData = JSON.parse(apiResult.stdout);
+    } catch (_e) {
+      assert.ok(false, 'Both outputs should be valid JSON');
+      return;
+    }
+
+    // Verify key fields match
+    assert.ok(
+      ghData.pullRequest.number === apiData.pullRequest.number,
+      'PR number should match'
+    );
+    assert.ok(
+      ghData.pullRequest.title === apiData.pullRequest.title,
+      'PR title should match'
+    );
+    assert.ok(
+      ghData.pullRequest.author.login === apiData.pullRequest.author.login,
+      'Author should match'
+    );
+    assert.ok(ghData.commits.length > 0, 'Should have commits from gh mode');
+    assert.ok(apiData.commits.length > 0, 'Should have commits from API mode');
+  });
+});

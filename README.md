@@ -73,10 +73,45 @@ chmod +x gh-load-pull-request.mjs
 Usage: gh-load-pull-request <pr-url> [options]
 
 Options:
-  -t, --token    GitHub personal access token (optional for public PRs)
-  -o, --output   Output file path (default: stdout)
-  -h, --help     Show help
-  --version      Show version number
+  -t, --token         GitHub personal access token (optional for public PRs)
+  -o, --output        Output directory (creates pr-<number>/ subfolder)
+  --format            Output format: markdown, json (default: markdown)
+  --download-images   Download embedded images (default: true)
+  --include-reviews   Include PR reviews (default: true)
+  --force-api         Force using GitHub API instead of gh CLI
+  --force-gh          Force using gh CLI, fail if not available
+  -v, --verbose       Enable verbose logging
+  -h, --help          Show help
+  --version           Show version number
+```
+
+## Backend Modes
+
+The tool supports two backend modes for fetching PR data:
+
+### 1. gh CLI Mode (Default)
+
+By default, the tool uses the [GitHub CLI](https://cli.github.com/) (`gh`) to fetch PR data. This is the recommended mode as it:
+
+- Uses your existing `gh` authentication
+- Doesn't require managing tokens separately
+- Works seamlessly with GitHub Enterprise
+
+### 2. API Mode (Fallback)
+
+If `gh` CLI is not available or not authenticated, the tool automatically falls back to using the GitHub REST API via Octokit. You can also force this mode with `--force-api`.
+
+### Controlling Backend Mode
+
+```bash
+# Use default mode (gh CLI with API fallback)
+gh-load-pull-request owner/repo#123
+
+# Force gh CLI mode (fails if gh is not available)
+gh-load-pull-request owner/repo#123 --force-gh
+
+# Force API mode (useful for testing or when gh has issues)
+gh-load-pull-request owner/repo#123 --force-api
 ```
 
 ## Input Formats
@@ -152,13 +187,22 @@ gh-load-pull-request https://github.com/facebook/react/pull/28000
 gh-load-pull-request facebook/react#28000
 
 # Save to file
-gh-load-pull-request facebook/react#28000 -o react-pr-28000.md
+gh-load-pull-request facebook/react#28000 -o ./output
 
 # Download private PR using gh CLI auth
 gh-load-pull-request myorg/private-repo#42
 
 # Download with explicit token
 gh-load-pull-request myorg/repo#123 --token ghp_your_token_here
+
+# Force using GitHub API instead of gh CLI
+gh-load-pull-request owner/repo#123 --force-api
+
+# Output as JSON
+gh-load-pull-request owner/repo#123 --format json
+
+# Verbose mode for debugging
+gh-load-pull-request owner/repo#123 -v
 
 # Pipe to other tools (e.g., AI for review)
 gh-load-pull-request owner/repo#123 | claude-analyze

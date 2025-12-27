@@ -8,7 +8,6 @@ import http from 'node:http';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { Octokit } from '@octokit/rest';
 import fs from 'fs-extra';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -20,6 +19,16 @@ import {
   generateCommitsMarkdown,
   generateFilesMarkdown,
 } from './formatters.mjs';
+
+import {
+  isGhInstalled as backendsIsGhInstalled,
+  isGhAuthenticated as backendsIsGhAuthenticated,
+  getGhToken as backendsGetGhToken,
+  loadPullRequest as backendsLoadPullRequest,
+  loadPullRequestWithGh as backendsLoadPullRequestWithGh,
+  loadPullRequestWithApi as backendsLoadPullRequestWithApi,
+  setLoggers,
+} from './backends.mjs';
 
 let version = '0.1.0';
 try {
@@ -60,6 +69,9 @@ const verboseLog = (color, message) => {
   }
 };
 
+// Initialize loggers for backends module
+setLoggers({ log, verboseLog });
+
 /**
  * Set logging mode for library usage
  * @param {Object} options - Logging options
@@ -69,38 +81,17 @@ const verboseLog = (color, message) => {
 export function setLoggingMode(options = {}) {
   verboseMode = options.verbose || false;
   silentMode = options.silent || false;
+  // Update loggers in backends module
+  setLoggers({ log, verboseLog });
 }
 
-async function isGhInstalled() {
-  try {
-    const { execSync } = await import('node:child_process');
-    execSync('gh --version', { stdio: 'pipe' });
-    return true;
-  } catch (_error) {
-    return false;
-  }
-}
-
-/**
- * Get GitHub token from gh CLI if available
- * @returns {Promise<string|null>} GitHub token or null
- */
-export async function getGhToken() {
-  try {
-    if (!(await isGhInstalled())) {
-      return null;
-    }
-
-    const { execSync } = await import('node:child_process');
-    const token = execSync('gh auth token', {
-      encoding: 'utf8',
-      stdio: 'pipe',
-    }).trim();
-    return token;
-  } catch (_error) {
-    return null;
-  }
-}
+// Re-export backend functions
+export const isGhInstalled = backendsIsGhInstalled;
+export const isGhAuthenticated = backendsIsGhAuthenticated;
+export const getGhToken = backendsGetGhToken;
+export const loadPullRequest = backendsLoadPullRequest;
+export const loadPullRequestWithGh = backendsLoadPullRequestWithGh;
+export const loadPullRequestWithApi = backendsLoadPullRequestWithApi;
 
 /**
  * Parse PR URL to extract owner, repo, and PR number
@@ -402,97 +393,6 @@ export async function downloadImages(content, imagesDir, token, _prNumber) {
   }
 
   return { content: updatedContent, downloadedImages };
-}
-
-/**
- * Fetch pull request data from GitHub API
- * @param {Object} options - Options for fetching PR
- * @param {string} options.owner - Repository owner
- * @param {string} options.repo - Repository name
- * @param {number} options.prNumber - Pull request number
- * @param {string} options.token - GitHub token (optional for public repos)
- * @param {boolean} options.includeReviews - Include PR reviews (default: true)
- * @returns {Promise<Object>} PR data object with pr, files, comments, reviewComments, reviews, commits
- */
-export async function loadPullRequest(options) {
-  const { owner, repo, prNumber, token, includeReviews = true } = options;
-
-  try {
-    log('blue', `🔍 Fetching pull request ${owner}/${repo}#${prNumber}...`);
-
-    const octokit = new Octokit({
-      auth: token,
-      baseUrl: 'https://api.github.com',
-    });
-
-    // Fetch PR data
-    const { data: pr } = await octokit.rest.pulls.get({
-      owner,
-      repo,
-      pull_number: prNumber,
-    });
-
-    // Fetch PR files
-    const { data: files } = await octokit.rest.pulls.listFiles({
-      owner,
-      repo,
-      pull_number: prNumber,
-    });
-
-    // Fetch PR comments (issue comments)
-    const { data: comments } = await octokit.rest.issues.listComments({
-      owner,
-      repo,
-      issue_number: prNumber,
-    });
-
-    // Fetch PR review comments (inline code comments)
-    const { data: reviewComments } =
-      await octokit.rest.pulls.listReviewComments({
-        owner,
-        repo,
-        pull_number: prNumber,
-      });
-
-    // Fetch PR reviews
-    let reviews = [];
-    if (includeReviews) {
-      const { data: reviewsData } = await octokit.rest.pulls.listReviews({
-        owner,
-        repo,
-        pull_number: prNumber,
-      });
-      reviews = reviewsData;
-    }
-
-    // Fetch PR commits
-    const { data: commits } = await octokit.rest.pulls.listCommits({
-      owner,
-      repo,
-      pull_number: prNumber,
-    });
-
-    log('green', `✅ Successfully fetched PR data`);
-
-    return {
-      pr,
-      files,
-      comments,
-      reviewComments,
-      reviews,
-      commits,
-    };
-  } catch (error) {
-    if (error.status === 404) {
-      throw new Error(`Pull request not found: ${owner}/${repo}#${prNumber}`);
-    } else if (error.status === 401) {
-      throw new Error(
-        'Authentication failed. Please provide a valid GitHub token'
-      );
-    } else {
-      throw new Error(`Failed to fetch pull request: ${error.message}`);
-    }
-  }
 }
 
 // Alias for backwards compatibility
@@ -888,6 +788,16 @@ function parseCliArgs() {
       describe: 'Enable verbose logging',
       default: false,
     })
+    .option('force-api', {
+      type: 'boolean',
+      describe: 'Force using GitHub API instead of gh CLI',
+      default: false,
+    })
+    .option('force-gh', {
+      type: 'boolean',
+      describe: 'Force using gh CLI, fail if not available',
+      default: false,
+    })
     .help('h')
     .alias('h', 'help')
     .example('$0 https://github.com/owner/repo/pull/123', 'Download PR #123')
@@ -898,7 +808,9 @@ function parseCliArgs() {
     .example(
       '$0 https://github.com/owner/repo/pull/123 --token ghp_xxx',
       'Download private PR'
-    ).argv;
+    )
+    .example('$0 owner/repo#123 --force-api', 'Force using GitHub API')
+    .example('$0 owner/repo#123 --force-gh', 'Force using gh CLI').argv;
 }
 
 async function main() {
@@ -911,10 +823,21 @@ async function main() {
     'include-reviews': includeReviews,
     format,
     verbose,
+    'force-api': forceApi,
+    'force-gh': forceGh,
   } = argv;
 
   // Set verbose mode
   verboseMode = verbose;
+
+  // Validate mutually exclusive flags
+  if (forceApi && forceGh) {
+    log(
+      'red',
+      '❌ Cannot use both --force-api and --force-gh at the same time'
+    );
+    process.exit(1);
+  }
 
   // Parse PR input first (before potentially slow gh CLI token fetch)
   const prInfo = parsePrUrl(prInput);
@@ -929,12 +852,16 @@ async function main() {
 
   let token = tokenArg;
 
-  // If no token provided, try to get it from gh CLI
-  if (!token || token === undefined) {
+  // If force-api mode or no token provided, try to get token from gh CLI for API fallback
+  if (forceApi || !token || token === undefined) {
     const ghToken = await getGhToken();
     if (ghToken) {
       token = ghToken;
-      log('cyan', '🔑 Using GitHub token from gh CLI');
+      if (forceApi) {
+        log('cyan', '🔑 Using GitHub token from gh CLI for API mode');
+      } else {
+        verboseLog('cyan', '🔑 Got GitHub token from gh CLI for fallback');
+      }
     }
   }
 
@@ -948,6 +875,8 @@ async function main() {
       prNumber,
       token,
       includeReviews,
+      forceApi,
+      forceGh,
     });
 
     // Determine output paths
